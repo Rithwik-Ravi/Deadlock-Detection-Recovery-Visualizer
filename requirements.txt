@@ -1,0 +1,3 @@
+# Deadlock Detection & Recovery - Phase 1
+# Phase 1 uses Python standard library only (no external dependencies required).
+# Python 3.8+ is recommended.
