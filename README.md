@@ -200,60 +200,158 @@ All 10 test cases validate matrix shapes, exception throwing on negative values,
 ### Safe Case Trace Preview (`python main.py --scenario safe`)
 
 ```
-=================================================================
-          CURRENT RESOURCE ALLOCATION SYSTEM STATE
-=================================================================
-Available Vector: [ A: 0  B: 0  C: 0 ]
------------------------------------------------------------------
-Process   |   Allocation   |    Request    
-          |    A    B    C |    A    B    C
------------------------------------------------------------------
-P0        |    0    1    0 |    0    0    0
-P1        |    2    0    0 |    2    0    2
-P2        |    3    0    3 |    0    0    0
-P3        |    2    1    1 |    1    0    0
-P4        |    0    0    2 |    0    0    2
-=================================================================
+----------------------------------------------------
+Current Available Resources (Work)
+----------------------------------------------------
 
-#################################################################
-       DEADLOCK DETECTION ALGORITHM EXECUTION TRACE
-#################################################################
-1. Initial Work Vector: [ A=0, B=0, C=0 ]
-2. Initial Finish Array: [ P0: F, P1: F, P2: F, P3: F, P4: F ]
+A : 0
+B : 0
+C : 0
 
-3. Iteration Steps:
-   [1] Selected Candidate: P0
-       * Outstanding Request : [0, 0, 0]
-       * Work Available       : [0, 0, 0]
-       * Condition Met        : Request <= Work (Satisfied)
-       * Released Allocation  : [0, 1, 0]
-       * Updated Work Vector  : [0, 1, 0]
-       * Finish Vector State  : [ P0: T, P1: F, P2: F, P3: F, P4: F ]
+----------------------------------------------------
 
-   [2] Selected Candidate: P2
-       * Outstanding Request : [0, 0, 0]
-       * Work Available       : [0, 1, 0]
-       * Condition Met        : Request <= Work (Satisfied)
-       * Released Allocation  : [3, 0, 3]
-       * Updated Work Vector  : [3, 1, 3]
-       * Finish Vector State  : [ P0: T, P1: F, P2: T, P3: F, P4: F ]
-   ...
------------------------------------------------------------------
-   >>> RESULT: SYSTEM IS DEADLOCK-FREE (SAFE) <<<
-   Safe Process Sequence: P0 -> P2 -> P1 -> P3 -> P4
-   Deadlocked Processes : None
------------------------------------------------------------------
+Checking Process P0...
+
+Request:
+A : 0
+B : 0
+C : 0
+
+Current Work:
+A : 0
+B : 0
+C : 0
+
+Comparison:
+A : 0 <= 0 ✓
+B : 0 <= 0 ✓
+C : 0 <= 0 ✓
+
+Result:
+✓ P0 CAN FINISH
+
+----------------------------------------------------
+P0 HAS FINISHED
+
+Resources currently held by P0:
+A : 0
+B : 1
+C : 0
+
+Releasing resources...
+
+Old Work:
+A : 0
+B : 0
+C : 0
+
++
+
+Released:
+A : 0
+B : 1
+C : 0
+
+=
+
+New Work:
+A : 0
+B : 1
+C : 0
+
+P0 has released all of its resources back to the system.
+----------------------------------------------------
+
+Processes:
+P0 ✓ Finished
+P1 ⏳ Waiting
+P2 ⏳ Waiting
+P3 ⏳ Waiting
+P4 ⏳ Waiting
+
+Current Safe Sequence:
+P0
+
+...
+----------------------------------------------------
+All processes have successfully finished!
+
+SYSTEM IS DEADLOCK-FREE (SAFE).
+
+Final Safe Sequence:
+P0
+↓
+P2
+↓
+P1
+↓
+P3
+↓
+P4
+
+(Sequence: P0 -> P2 -> P1 -> P3 -> P4)
+----------------------------------------------------
 ```
 
 ### Deadlocked Case Trace Preview (`python main.py --scenario deadlocked`)
 
 ```
------------------------------------------------------------------
-   >>> RESULT: SYSTEM IS IN DEADLOCK <<<
-   Deadlocked Processes : ['P1', 'P2', 'P3', 'P4']
-   Processes that freed : ['P0']
------------------------------------------------------------------
-Summary: DEADLOCK DETECTED! 4 process(es) are in a circular wait state: P1, P2, P3, P4. System cannot make progress.
+Checking Process P1...
+
+Request:
+A : 2
+B : 0
+C : 2
+
+Current Work:
+A : 0
+B : 1
+C : 0
+
+Comparison:
+A : 2 <= 0 ✗
+B : 0 <= 1 ✓
+C : 2 <= 0 ✗
+
+Result:
+P1 CANNOT EXECUTE
+
+Reason:
+Resources A, C are insufficient.
+
+----------------------------------------------------
+No runnable process found.
+
+Checking remaining processes...
+
+P1 waiting for:
+A = 2
+Current A = 0
+C = 2
+Current C = 0
+
+P2 waiting for:
+C = 1
+Current C = 0
+
+P3 waiting for:
+A = 1
+Current A = 0
+
+P4 waiting for:
+C = 2
+Current C = 0
+
+Since no remaining request can be satisfied, the algorithm terminates.
+
+DEADLOCK DETECTED.
+
+Deadlocked Processes:
+P1
+P2
+P3
+P4
+----------------------------------------------------
 ```
 
 ---

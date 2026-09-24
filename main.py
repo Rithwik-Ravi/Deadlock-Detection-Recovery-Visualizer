@@ -18,6 +18,18 @@ import json
 import argparse
 from typing import List
 
+# Configure UTF-8 encoding for standard output on Windows to support ✓, ✗, ⏳, ↓
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+if hasattr(sys.stderr, "reconfigure"):
+    try:
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
 from deadlock_core import DeadlockSystem, DetectionReport
 from demo_scenarios import get_scenario, get_all_scenarios, Scenario
 
@@ -73,42 +85,12 @@ def run_scenario(scenario: Scenario, step_by_step: bool = False, print_json: boo
     # 1. Print formatted matrix state
     system.pretty_print_state()
 
-    # 2. Interactive step-by-step mode if requested
+    # 2. Run detection and print detailed, step-by-step explanatory trace
     if step_by_step:
-        print(colorize("\n[Step-by-Step Viva Mode Enabled - Press Enter to Advance Each Step]", Colors.YELLOW))
-        rep = system.detect_deadlock()
+        print(colorize("\n[Step-by-Step Viva Mode Enabled - Press Enter to Advance Each Step]\n", Colors.YELLOW))
 
-        init_work = ", ".join(f"{r}={v}" for r, v in zip(rep.resource_names, rep.initial_work))
-        print(f"\n1. Initial Work Vector: [ {init_work} ]")
-        input(colorize("   [Press Enter to start evaluation...] ", Colors.CYAN))
-
-        if not rep.steps:
-            print(colorize("   -> No process could be scheduled! Work is insufficient for any request.", Colors.RED))
-        else:
-            for s in rep.steps:
-                print(f"\n   [{colorize(f'Step {s.step_number}', Colors.BOLD + Colors.GREEN)}] Evaluating Candidate: {colorize(s.process, Colors.BOLD)}")
-                print(f"       * Outstanding Request : {s.request}")
-                print(f"       * Available Work      : {s.work_before}")
-                print(f"       * Check               : {colorize('Request <= Work [SATISFIED]', Colors.GREEN)}")
-                print(f"       * Resource Release    : +{s.allocation_released}")
-                print(f"       * New Work Vector     : {s.work_after}")
-                fin_str = ", ".join(f"{p}: {'T' if s.finish_snapshot[p] else 'F'}" for p in rep.process_names)
-                print(f"       * Finish Vector       : [ {fin_str} ]")
-                input(colorize("   [Press Enter to proceed to next step...] ", Colors.CYAN))
-
-        print("\n" + "-" * 70)
-        if rep.is_deadlocked:
-            print(colorize("   >>> RESULT: SYSTEM IS IN DEADLOCK <<<", Colors.BOLD + Colors.RED))
-            print(f"   Deadlocked Processes : {colorize(str(rep.deadlocked_processes), Colors.RED)}")
-        else:
-            print(colorize("   >>> RESULT: SYSTEM IS DEADLOCK-FREE (SAFE) <<<", Colors.BOLD + Colors.GREEN))
-            print(f"   Safe Execution Order : {colorize(' -> '.join(rep.safe_sequence), Colors.GREEN)}")
-        print("-" * 70)
-        print(f"Summary: {rep.summary}\n")
-    else:
-        # Standard automated trace
-        rep = system.detect_deadlock()
-        system.print_detection_trace(rep)
+    rep = system.detect_deadlock()
+    system.print_detection_trace(rep, step_by_step=step_by_step)
 
     # 3. Optional JSON payload dump (verifying GUI contract)
     if print_json:

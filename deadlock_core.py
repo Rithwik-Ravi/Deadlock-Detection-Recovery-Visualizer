@@ -14,6 +14,19 @@ from dataclasses import dataclass, field, asdict
 from typing import List, Dict, Optional, Any
 import copy
 import json
+import sys
+
+# Configure UTF-8 encoding for standard output on Windows to support ✓, ✗, ⏳, ↓
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+if hasattr(sys.stderr, "reconfigure"):
+    try:
+        sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
 
 
 @dataclass
@@ -398,64 +411,213 @@ class DeadlockSystem:
 
         print("=" * 65 + "\n")
 
-    def print_detection_trace(self, report: Optional[DetectionReport] = None) -> None:
+    def print_detection_trace(
+        self,
+        report: Optional[DetectionReport] = None,
+        step_by_step: bool = False,
+    ) -> None:
         """
-        Print an annotated, human-readable trace of the detection algorithm's execution.
+        Print an explanatory, visual trace of the detection algorithm showing
+        how resources are requested, compared, allocated, and freed step-by-step.
         """
         rep = report or self.last_report
         if rep is None:
             rep = self.detect_deadlock()
 
-        print("\n" + "#" * 65)
-        print("       DEADLOCK DETECTION ALGORITHM EXECUTION TRACE")
-        print("#" * 65)
+        # Unicode symbols with graceful fallback for legacy terminals
+        try:
+            CHECK = "✓"
+            CROSS = "✗"
+            HOURGLASS = "⏳"
+            DOWN_ARROW = "↓"
+            "✓ ✗ ⏳ ↓".encode(sys.stdout.encoding or "utf-8")
+        except Exception:
+            CHECK = "[OK]"
+            CROSS = "[X]"
+            HOURGLASS = "[WAIT]"
+            DOWN_ARROW = "v"
 
-        # Initial conditions
-        init_work_str = ", ".join(f"{r}={v}" for r, v in zip(rep.resource_names, rep.initial_work))
-        print(f"1. Initial Work Vector: [ {init_work_str} ]")
+        n = len(self.allocation)
+        m = len(self.available)
 
-        # Initial Finish status
-        finish_statuses = [
-            f"{p}: {'T' if rep.initial_finish[p] else 'F'}" for p in rep.process_names
+        work = copy.deepcopy(self.available)
+        finish = [
+            False if any(self.allocation[i][j] > 0 for j in range(m)) else True
+            for i in range(n)
         ]
-        print(f"2. Initial Finish Array: [ {', '.join(finish_statuses)} ]")
-        zero_allocs = [p for p in rep.process_names if rep.initial_finish[p]]
+        safe_sequence: List[str] = []
+
+        DIVIDER = "----------------------------------------------------"
+
+        # Note any zero-allocation processes initialized as finished per Step 1b
+        zero_allocs = [self.process_names[i] for i in range(n) if finish[i]]
         if zero_allocs:
-            print(f"   (Note: {', '.join(zero_allocs)} hold 0 resources -> marked Finish=True initially)")
+            print(f"Note: Process(es) {', '.join(zero_allocs)} hold 0 resources.")
+            print(f"Initial Status: Marked as Finished (cannot cause circular wait).\n")
 
-        print("\n3. Iteration Steps:")
-        if not rep.steps:
-            print("   -> No process could be scheduled! Work is insufficient for any request.")
+        while True:
+            # 1. Before every iteration print the current Work vector
+            print(DIVIDER)
+            print("Current Available Resources (Work)")
+            print(DIVIDER)
+            print()
+            for j in range(m):
+                print(f"{self.resource_names[j]} : {work[j]}")
+            print()
+            print(DIVIDER)
+            print()
+
+            found_candidate = False
+
+            # 2. Check unfinished processes
+            for i in range(n):
+                if not finish[i]:
+                    p_name = self.process_names[i]
+                    print(f"Checking Process {p_name}...\n")
+
+                    print("Request:")
+                    for j in range(m):
+                        print(f"{self.resource_names[j]} : {self.request[i][j]}")
+                    print()
+
+                    print("Current Work:")
+                    for j in range(m):
+                        print(f"{self.resource_names[j]} : {work[j]}")
+                    print()
+
+                    print("Comparison:")
+                    can_satisfy = True
+                    insufficient_resources: List[str] = []
+                    for j in range(m):
+                        req_val = self.request[i][j]
+                        work_val = work[j]
+                        if req_val <= work_val:
+                            print(f"{self.resource_names[j]} : {req_val} <= {work_val} {CHECK}")
+                        else:
+                            print(f"{self.resource_names[j]} : {req_val} <= {work_val} {CROSS}")
+                            can_satisfy = False
+                            insufficient_resources.append(self.resource_names[j])
+                    print()
+
+                    if can_satisfy:
+                        print("Result:")
+                        print(f"{CHECK} {p_name} CAN FINISH\n")
+
+                        # Show resources being released
+                        print(DIVIDER)
+                        print(f"{p_name} HAS FINISHED\n")
+
+                        print(f"Resources currently held by {p_name}:")
+                        for j in range(m):
+                            print(f"{self.resource_names[j]} : {self.allocation[i][j]}")
+                        print()
+
+                        print("Releasing resources...\n")
+
+                        print("Old Work:")
+                        for j in range(m):
+                            print(f"{self.resource_names[j]} : {work[j]}")
+                        print("\n+\n")
+
+                        print("Released:")
+                        for j in range(m):
+                            print(f"{self.resource_names[j]} : {self.allocation[i][j]}")
+                        print("\n=\n")
+
+                        for j in range(m):
+                            work[j] += self.allocation[i][j]
+
+                        print("New Work:")
+                        for j in range(m):
+                            print(f"{self.resource_names[j]} : {work[j]}")
+                        print()
+
+                        print(f"{p_name} has released all of its resources back to the system.")
+                        print(DIVIDER)
+                        print()
+
+                        finish[i] = True
+                        safe_sequence.append(p_name)
+                        found_candidate = True
+
+                        # Print updated process status
+                        print("Processes:")
+                        for k in range(n):
+                            p_k = self.process_names[k]
+                            status_str = f"{CHECK} Finished" if finish[k] else f"{HOURGLASS} Waiting"
+                            print(f"{p_k} {status_str}")
+                        print()
+
+                        # Print gradual safe sequence
+                        print("Current Safe Sequence:")
+                        if safe_sequence:
+                            print(f"\n{DOWN_ARROW}\n".join(safe_sequence))
+                        else:
+                            print("(Empty)")
+                        print()
+
+                        if step_by_step:
+                            try:
+                                input("[Press Enter to proceed to next step...] ")
+                                print()
+                            except (EOFError, KeyboardInterrupt):
+                                pass
+
+                        # Restart scan with updated Work vector
+                        break
+                    else:
+                        print("Result:")
+                        print(f"{p_name} CANNOT EXECUTE\n")
+                        print("Reason:")
+                        if len(insufficient_resources) == 1:
+                            print(f"Resource {insufficient_resources[0]} is insufficient.\n")
+                        else:
+                            print(f"Resources {', '.join(insufficient_resources)} are insufficient.\n")
+
+                        if step_by_step:
+                            try:
+                                input("[Press Enter to check next process...] ")
+                                print()
+                            except (EOFError, KeyboardInterrupt):
+                                pass
+
+            if not found_candidate:
+                # No remaining unfinished process can be satisfied
+                break
+
+        # 3. Final termination status
+        deadlocked = [self.process_names[i] for i in range(n) if not finish[i]]
+
+        if deadlocked:
+            print(DIVIDER)
+            print("No runnable process found.\n")
+            print("Checking remaining processes...\n")
+
+            for i in range(n):
+                if not finish[i]:
+                    p_name = self.process_names[i]
+                    print(f"{p_name} waiting for:")
+                    for j in range(m):
+                        req_val = self.request[i][j]
+                        work_val = work[j]
+                        if req_val > work_val:
+                            print(f"{self.resource_names[j]} = {req_val}")
+                            print(f"Current {self.resource_names[j]} = {work_val}")
+                    print()
+
+            print("Since no remaining request can be satisfied, the algorithm terminates.\n")
+            print("DEADLOCK DETECTED.\n")
+            print("Deadlocked Processes:")
+            for p in deadlocked:
+                print(p)
+            print(DIVIDER)
+            print()
         else:
-            for s in rep.steps:
-                print(f"   [{s.step_number}] Selected Candidate: {s.process}")
-                print(f"       * Outstanding Request : {s.request}")
-                print(f"       * Work Available       : {s.work_before}")
-                print(f"       * Condition Met        : Request <= Work (Satisfied)")
-                print(f"       * Released Allocation  : {s.allocation_released}")
-                print(f"       * Updated Work Vector  : {s.work_after}")
-                finish_str = ", ".join(f"{p}: {'T' if s.finish_snapshot[p] else 'F'}" for p in rep.process_names)
-                print(f"       * Finish Vector State  : [ {finish_str} ]")
-                print()
-
-        # Final Outcome
-        print("4. Final Analysis:")
-        final_work_str = ", ".join(f"{r}={v}" for r, v in zip(rep.resource_names, rep.final_work))
-        print(f"   * Final Work Vector : [ {final_work_str} ]")
-        final_fin_str = ", ".join(f"{p}: {'T' if rep.final_finish[p] else 'F'}" for p in rep.process_names)
-        print(f"   * Final Finish State: [ {final_fin_str} ]")
-
-        print("\n" + "-" * 65)
-        if rep.is_deadlocked:
-            print("   >>> RESULT: SYSTEM IS IN DEADLOCK <<<")
-            print(f"   Deadlocked Processes : {rep.deadlocked_processes}")
-            if rep.safe_sequence:
-                print(f"   Processes that freed : {rep.safe_sequence}")
-            else:
-                print("   Processes that freed : None")
-        else:
-            print("   >>> RESULT: SYSTEM IS DEADLOCK-FREE (SAFE) <<<")
-            print(f"   Safe Process Sequence: {' -> '.join(rep.safe_sequence)}")
-            print("   Deadlocked Processes : None")
-        print("-" * 65)
-        print(f"Summary: {rep.summary}\n")
+            print(DIVIDER)
+            print("All processes have successfully finished!\n")
+            print("SYSTEM IS DEADLOCK-FREE (SAFE).\n")
+            print("Final Safe Sequence:")
+            print(f"\n{DOWN_ARROW}\n".join(safe_sequence))
+            print(f"\n(Sequence: {' -> '.join(safe_sequence)})")
+            print(DIVIDER)
+            print()
