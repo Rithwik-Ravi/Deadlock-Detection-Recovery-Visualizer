@@ -1,3 +1,5 @@
-# Deadlock Detection & Recovery - Phase 1
-# Phase 1 uses Python standard library only (no external dependencies required).
-# Python 3.8+ is recommended.
+fastapi>=0.110.0
+uvicorn>=0.28.0
+rich>=13.7.0
+pytest>=8.0.0
+ruff>=0.3.0

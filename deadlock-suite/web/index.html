@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Deadlock detection and recovery: resource allocation graph</title>
+  <meta name="description" content="Step through the Silberschatz multi-instance deadlock detection algorithm on a resource allocation graph, then compare recovery strategies including Debt-Ledger Recovery.">
+  <link rel="preload" href="vendor/fonts/atkinson-next-400.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="vendor/fonts/source-serif-4-400.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="style.css">
+  <!-- Vendored D3 v7: no runtime CDN -->
+  <script src="vendor/d3.v7.min.js"></script>
+</head>
+<body>
+
+  <!-- Icon set: 24-unit grid, 1.5px stroke. Used only by transport and zoom controls. -->
+  <svg class="sprite" aria-hidden="true" focusable="false">
+    <symbol id="i-first" viewBox="0 0 24 24"><path d="M7 6v12M17 6l-6 6 6 6"/></symbol>
+    <symbol id="i-prev" viewBox="0 0 24 24"><path d="M14.5 6l-6 6 6 6"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><path d="M8.5 5.5l10 6.5-10 6.5z"/></symbol>
+    <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 6v12M15 6v12"/></symbol>
+    <symbol id="i-next" viewBox="0 0 24 24"><path d="M9.5 6l6 6-6 6"/></symbol>
+    <symbol id="i-last" viewBox="0 0 24 24"><path d="M17 6v12M7 6l6 6-6 6"/></symbol>
+    <symbol id="i-zoom-in" viewBox="0 0 24 24"><path d="M6 12h12M12 6v12"/></symbol>
+    <symbol id="i-zoom-out" viewBox="0 0 24 24"><path d="M6 12h12"/></symbol>
+    <symbol id="i-fit" viewBox="0 0 24 24"><path d="M5 9.5V5h4.5M14.5 5H19v4.5M19 14.5V19h-4.5M9.5 19H5v-4.5"/></symbol>
+  </svg>
+
+  <header class="masthead">
+    <h1 class="wordmark">Deadlock detection and recovery</h1>
+
+    <nav class="tabs" role="tablist" aria-label="Sections">
+      <button class="tab" role="tab" id="tab-btn-detection" data-tab="detection" aria-controls="pane-detection" aria-selected="true">Detection</button>
+      <button class="tab" role="tab" id="tab-btn-recovery" data-tab="recovery" aria-controls="pane-recovery" aria-selected="false" tabindex="-1">Recovery</button>
+      <button class="tab" role="tab" id="tab-btn-matrix" data-tab="matrix-editor" aria-controls="pane-matrix-editor" aria-selected="false" tabindex="-1">Custom matrix</button>
+      <button class="tab" role="tab" id="tab-btn-viva" data-tab="viva" aria-controls="pane-viva" aria-selected="false" tabindex="-1">Theory</button>
+    </nav>
+
+    <div class="toolbar">
+      <label class="field-inline" for="scenario-select">Scenario</label>
+      <select id="scenario-select" class="select">
+        <option value="safe">Classic Silberschatz</option>
+        <option value="deadlocked">Deadlocked variant</option>
+        <option value="borderline">Borderline cascade</option>
+        <option value="circular">Circular wait</option>
+        <option value="zero_alloc">Zero-allocation process</option>
+        <option value="custom">Custom matrices</option>
+      </select>
+      <button id="btn-run-detect" class="btn btn-primary" type="button">Run detection</button>
+      <details class="menu" id="export-menu">
+        <summary class="btn">Export</summary>
+        <div class="menu-list" role="menu">
+          <button id="btn-export-json" class="menu-item" type="button" role="menuitem">Export JSON</button>
+          <button id="btn-export-png" class="menu-item" type="button" role="menuitem">Save PNG</button>
+        </div>
+      </details>
+    </div>
+  </header>
+
+  <main class="stage">
+
+    <!-- ==================== Detection ==================== -->
+    <section id="pane-detection" class="pane pane-detection is-active" role="tabpanel" aria-labelledby="tab-btn-detection">
+
+      <div class="figure-col">
+        <figure class="figure" id="det-figure">
+          <div class="figure-tools">
+            <div class="toggles" role="group" aria-label="Edge types">
+              <button type="button" class="toggle" id="det-toggle-alloc" aria-pressed="true">Allocations</button>
+              <button type="button" class="toggle" id="det-toggle-req" aria-pressed="true">Requests</button>
+            </div>
+            <div class="zoom" role="group" aria-label="Zoom">
+              <button type="button" class="icon-btn" id="zoom-out" aria-label="Zoom out" title="Zoom out"><svg class="icon"><use href="#i-zoom-out"/></svg></button>
+              <button type="button" class="icon-btn" id="zoom-in" aria-label="Zoom in" title="Zoom in"><svg class="icon"><use href="#i-zoom-in"/></svg></button>
+              <button type="button" class="icon-btn" id="zoom-fit" aria-label="Fit to view" title="Fit to view"><svg class="icon"><use href="#i-fit"/></svg></button>
+            </div>
+          </div>
+          <div class="plate" id="det-plate">
+            <svg id="rag-svg" role="img" aria-labelledby="det-caption"></svg>
+          </div>
+          <figcaption class="caption" id="det-caption">Figure: resource allocation graph.</figcaption>
+          <ul class="legend" id="det-legend" aria-label="Legend"></ul>
+        </figure>
+
+        <div class="transport" id="det-transport"></div>
+      </div>
+
+      <aside class="inspector" aria-label="Algorithm state">
+        <section class="section section-step" aria-live="polite">
+          <h2 class="section-title" id="step-title">Initial state</h2>
+          <p class="prose" id="step-explanation">Choose a scenario and select Run detection.</p>
+        </section>
+
+        <section class="section">
+          <h2 class="section-title">State</h2>
+          <table class="kv">
+            <tbody>
+              <tr><th scope="row">Available</th><td class="vec" id="vec-available"></td></tr>
+              <tr><th scope="row">Work</th><td class="vec" id="vec-work"></td></tr>
+              <tr><th scope="row">Finish</th><td class="vec" id="vec-finish"></td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section class="section">
+          <p class="outcome" id="outcome-line"></p>
+        </section>
+
+        <section class="section section-trace">
+          <h2 class="section-title">Trace</h2>
+          <ol class="trace" id="trace-log"></ol>
+        </section>
+      </aside>
+
+      <section class="matrix-strip" id="matrix-strip" aria-label="Matrices"></section>
+    </section>
+
+    <!-- ==================== Recovery ==================== -->
+    <section id="pane-recovery" class="pane pane-recovery" role="tabpanel" aria-labelledby="tab-btn-recovery" hidden>
+
+      <div class="recovery-grid">
+        <div class="recovery-controls">
+          <fieldset class="section strategy-list">
+            <legend class="section-title">Strategy</legend>
+            <label class="choice">
+              <input type="radio" name="strategy" value="abort_all">
+              <span class="choice-name">Abort all</span>
+              <span class="choice-desc">Terminate every deadlocked process at once.</span>
+            </label>
+            <label class="choice">
+              <input type="radio" name="strategy" value="abort_one_by_one">
+              <span class="choice-name">Abort one by one</span>
+              <span class="choice-desc">Terminate the cheapest victim, then detect again until the deadlock clears.</span>
+            </label>
+            <label class="choice">
+              <input type="radio" name="strategy" value="preemption">
+              <span class="choice-name">Preempt and roll back</span>
+              <span class="choice-desc">Take resources from a victim and roll it back to a checkpoint.</span>
+            </label>
+            <label class="choice">
+              <input type="radio" name="strategy" value="dlr" id="strat-dlr" checked>
+              <span class="choice-name">Debt-Ledger Recovery</span>
+              <span class="choice-desc">Suspend lenders in place, lend their units, and repay them in a proven safe order. Proposed method<sup><a href="#fn-dlr" class="fn-ref" id="fn-dlr-ref">1</a></sup></span>
+            </label>
+          </fieldset>
+
+          <section class="section attrs">
+            <div class="section-head">
+              <h2 class="section-title">Process attributes</h2>
+              <button type="button" class="btn-text" id="btn-reset-attrs">Reset values</button>
+            </div>
+            <div class="table-scroll">
+              <table class="data data-attrs" id="attrs-table">
+                <thead>
+                  <tr>
+                    <th scope="col">Process</th>
+                    <th scope="col">Priority</th>
+                    <th scope="col">Progress</th>
+                    <th scope="col">Work units</th>
+                    <th scope="col">Rollback</th>
+                    <th scope="col">Restartable</th>
+                  </tr>
+                </thead>
+                <tbody id="attrs-tbody"></tbody>
+              </table>
+            </div>
+            <p class="field-error" id="attrs-error" role="alert" hidden></p>
+          </section>
+
+          <div class="section run-row">
+            <button id="btn-run-recovery" class="btn btn-primary" type="button">Run recovery</button>
+            <p class="field-error" id="recovery-error" role="alert" hidden></p>
+          </div>
+        </div>
+
+        <div class="figure-col">
+          <figure class="figure" id="rec-figure">
+            <div class="figure-tools">
+              <div class="toggles" role="group" aria-label="Edge types">
+                <button type="button" class="toggle" id="rec-toggle-alloc" aria-pressed="true">Allocations</button>
+                <button type="button" class="toggle" id="rec-toggle-req" aria-pressed="true">Requests</button>
+              </div>
+              <div class="zoom" role="group" aria-label="Zoom">
+                <button type="button" class="icon-btn" id="recovery-zoom-out" aria-label="Zoom out" title="Zoom out"><svg class="icon"><use href="#i-zoom-out"/></svg></button>
+                <button type="button" class="icon-btn" id="recovery-zoom-in" aria-label="Zoom in" title="Zoom in"><svg class="icon"><use href="#i-zoom-in"/></svg></button>
+                <button type="button" class="icon-btn" id="recovery-zoom-fit" aria-label="Fit to view" title="Fit to view"><svg class="icon"><use href="#i-fit"/></svg></button>
+              </div>
+            </div>
+            <div class="plate" id="rec-plate">
+              <svg id="recovery-rag-svg" role="img" aria-labelledby="rec-caption"></svg>
+            </div>
+            <figcaption class="caption" id="rec-caption">Figure: recovery.</figcaption>
+            <ul class="legend" id="rec-legend" aria-label="Legend"></ul>
+          </figure>
+          <div class="transport" id="rec-transport"></div>
+        </div>
+
+        <aside class="inspector" aria-label="Recovery state">
+          <section class="section section-plan">
+            <h2 class="section-title">Plan</h2>
+            <ol class="plan" id="plan-list"><li class="empty">Choose a strategy and select Run recovery.</li></ol>
+          </section>
+          <section class="section">
+            <h2 class="section-title">Ledger</h2>
+            <table class="data data-ledger" id="ledger-table">
+              <thead>
+                <tr>
+                  <th scope="col">Creditor</th>
+                  <th scope="col">Resource</th>
+                  <th scope="col" class="num">Units</th>
+                  <th scope="col">Owed by</th>
+                  <th scope="col">Status</th>
+                </tr>
+              </thead>
+              <tbody id="ledger-tbody">
+                <tr><td colspan="5" class="empty">No units lent yet.</td></tr>
+              </tbody>
+            </table>
+          </section>
+          <section class="section">
+            <h2 class="section-title">Blame</h2>
+            <div id="blame-chart-container" class="bars">
+              <p class="empty">Run recovery or compare strategies to see each process's share.</p>
+            </div>
+          </section>
+        </aside>
+      </div>
+
+      <section class="comparison" id="comparison-card" aria-labelledby="comparison-title">
+        <div class="section-head">
+          <h2 class="heading" id="comparison-title">Comparison</h2>
+          <div class="actions">
+            <button id="btn-run-compare" class="btn" type="button">Compare all strategies</button>
+            <button id="btn-run-random-benchmark" class="btn" type="button">Run on 200 random systems</button>
+          </div>
+        </div>
+        <p class="prose-sm" id="comparison-status">Select Compare all strategies to measure them on the current system.</p>
+        <div class="multiples" id="comparison-charts"></div>
+
+        <div id="benchmark-results-box" class="benchmark" hidden>
+          <h3 class="subheading" id="benchmark-title">Average over 200 random deadlocked systems</h3>
+          <table class="data data-bench" aria-labelledby="benchmark-title">
+            <thead>
+              <tr>
+                <th scope="col">Strategy</th>
+                <th scope="col" class="num">Lost work</th>
+                <th scope="col" class="num">Processes aborted</th>
+                <th scope="col" class="num">Total cost</th>
+                <th scope="col" class="num">Fairness</th>
+              </tr>
+            </thead>
+            <tbody id="benchmark-tbody"></tbody>
+          </table>
+        </div>
+
+        <p class="footnote" id="fn-dlr"><a href="#fn-dlr-ref" aria-label="Back to strategy list">1</a> Debt-Ledger Recovery is this project's proposed method. Related work and how it differs are in <code>docs/RELATED_WORK.md</code> in the project repository.</p>
+      </section>
+    </section>
+
+    <!-- ==================== Custom matrix ==================== -->
+    <section id="pane-matrix-editor" class="pane pane-matrix" role="tabpanel" aria-labelledby="tab-btn-matrix" hidden>
+      <div class="editor">
+        <div class="section-head">
+          <h2 class="heading">Custom matrix</h2>
+          <div class="actions">
+            <button id="btn-add-proc" class="btn-text" type="button">Add process</button>
+            <button id="btn-add-res" class="btn-text" type="button">Add resource</button>
+          </div>
+        </div>
+        <p class="prose-sm">Edit any number, or click a process or resource name to rename it. Changes apply when you run detection.</p>
+
+        <div id="matrix-empty" class="empty-state" hidden>
+          <p>Add at least one process and one resource to start, or <button type="button" class="btn-link" id="btn-load-scenario">load a scenario</button>.</p>
+        </div>
+
+        <div id="matrix-body">
+          <h3 class="subheading">Available</h3>
+          <div id="custom-available-container" class="table-scroll"></div>
+
+          <div class="editor-pair">
+            <div>
+              <h3 class="subheading">Allocation <span class="soft">(units held)</span></h3>
+              <div id="custom-allocation-container" class="table-scroll"></div>
+            </div>
+            <div>
+              <h3 class="subheading">Request <span class="soft">(units still needed)</span></h3>
+              <div id="custom-request-container" class="table-scroll"></div>
+            </div>
+          </div>
+        </div>
+
+        <p id="matrix-error-alert" class="field-error" role="alert" hidden></p>
+
+        <div class="run-row">
+          <button id="btn-apply-custom-matrix" class="btn btn-primary" type="button">Run detection</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================== Theory ==================== -->
+    <section id="pane-viva" class="pane pane-theory" role="tabpanel" aria-labelledby="tab-btn-viva" hidden>
+      <nav class="toc" aria-label="Contents">
+        <h2 class="toc-title">Contents</h2>
+        <ol class="toc-list">
+          <li><a href="#th-conditions">Conditions for deadlock</a></li>
+          <li><a href="#th-rag">Resource allocation graphs</a></li>
+          <li><a href="#th-detect">Detection algorithm</a></li>
+          <li><a href="#th-recovery">Recovery strategies</a></li>
+          <li><a href="#th-dlr">Debt-Ledger Recovery</a></li>
+          <li><a href="#th-viva">Viva questions</a></li>
+        </ol>
+      </nav>
+
+      <article class="theory">
+        <h2 class="heading-xl">Deadlock detection and recovery</h2>
+        <p>This page collects the theory behind the tool. The figure, numbers, and trace on the Detection tab follow the algorithm below step by step.</p>
+
+        <h3 class="heading" id="th-conditions">Conditions for deadlock</h3>
+        <p>A deadlock can arise only when all four Coffman conditions hold at once:</p>
+        <ol>
+          <li>Mutual exclusion: resources cannot be shared.</li>
+          <li>Hold and wait: a process holds resources while waiting for others.</li>
+          <li>No preemption: resources cannot be taken away by force.</li>
+          <li>Circular wait: a closed chain P0 → P1 → … → P0 exists.</li>
+        </ol>
+
+        <h3 class="heading" id="th-rag">Resource allocation graphs</h3>
+        <p>Processes are circles and resource types are boxes, with one small dot per instance. A solid blue edge from a box to a process is an allocation. A dashed red edge from a process to a box is a request.</p>
+        <p>With multiple instances per resource type, a cycle is necessary for deadlock but not sufficient. Deadlock exists only if no process in the cycle can ever get the units it lacks.</p>
+
+        <h3 class="heading" id="th-detect">Detection algorithm</h3>
+        <p>The Silberschatz multi-instance algorithm assumes that any process whose request can be met will finish and release everything it holds.</p>
+        <pre class="formula">Work   = Available
+Finish[i] = (Allocation[i] == 0)        for each i
+
+repeat:
+  find the lowest i with Finish[i] == false
+                    and Request[i] &lt;= Work
+  if none: stop
+  Work      = Work + Allocation[i]
+  Finish[i] = true
+  rescan from i = 0
+
+deadlocked = { i : Finish[i] == false }</pre>
+        <p>The algorithm runs in O(m × n²) time for n processes and m resource types. It rescans from index 0 after every finish, because the freed units may now satisfy a process that was skipped earlier.</p>
+
+        <h3 class="heading" id="th-recovery">Recovery strategies</h3>
+        <p>Abort all terminates every deadlocked process and loses all their work. Abort one by one terminates victims one at a time and runs detection again after each. Preempt and roll back takes resources from a victim and loses the work since its checkpoint.</p>
+
+        <h3 class="heading" id="th-dlr">Debt-Ledger Recovery</h3>
+        <p>Debt-Ledger Recovery suspends lender processes in place and lends their units. Lenders lose no progress: they resume once the debt is repaid. A lend plan L is approved only if detection on the ledger-augmented state finds no deadlock:</p>
+        <pre class="formula">Allocation' = Allocation - L
+Request'    = Request + L
+Available'  = Available + sum(L)</pre>
+        <p>The safe sequence from that run becomes the repayment order. At every step the conservation invariant holds:</p>
+        <pre class="formula">Available + sum(Allocation) + in_transit == Total</pre>
+
+        <h3 class="heading" id="th-viva">Viva questions</h3>
+        <label class="field-label" for="viva-search">Search questions</label>
+        <input type="search" id="viva-search" class="input input-search" placeholder="For example: Shapley">
+        <div id="viva-qa-list" class="qa"></div>
+      </article>
+    </section>
+
+  </main>
+
+  <footer class="colophon">
+    <details class="viva-note" id="viva-note-card">
+      <summary>Viva note</summary>
+      <p class="prose" id="viva-note-text">Choose a scenario to see its viva note.</p>
+    </details>
+    <p class="credits">Operating Systems (BCSE303L) project by Sri Krishna (24BCE2630), Rithvik Ravi (24BCE2254) and Aditya (24BCE2242).</p>
+  </footer>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

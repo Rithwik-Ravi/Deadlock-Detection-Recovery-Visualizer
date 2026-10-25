@@ -1,0 +1,33 @@
+[project]
+name = "deadlock-suite"
+version = "1.0.0"
+description = "Deadlock Detection & Recovery: Resource Allocation Graph Visualizer"
+authors = [
+    { name = "Sri Krishna", email = "24BCE2630@vitstudent.ac.in" },
+    { name = "Rithvik Ravi", email = "24BCE2254@vitstudent.ac.in" },
+    { name = "Aditya", email = "24BCE2242@vitstudent.ac.in" }
+]
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110.0",
+    "uvicorn>=0.28.0",
+    "rich>=13.7.0",
+    "pytest>=8.0.0",
+    "ruff>=0.3.0"
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = [
+    "SIM102",  # Allow collapsible ifs for readability
+    "SIM211",  # Allow False if ... else True for algorithm readability
+    "B008",    # FastAPI Depends in function arguments
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
